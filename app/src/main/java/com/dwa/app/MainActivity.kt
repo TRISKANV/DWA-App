@@ -44,66 +44,72 @@ class MainActivity : AppCompatActivity() {
         optionsPanel.visibility = View.GONE
 
         btnAnalyze.setOnClickListener {
-            val url = urlInput.text.toString().trim()
-            if (url.isNotEmpty() && (url.contains("tiktok") || url.contains("youtu") || url.contains("instagram"))) {
-                Toast.makeText(this, "🔍 Analizando contenido...", Toast.LENGTH_SHORT).show()
+            val url = urlInput.text.toString().trim().lowercase()
+            // Expandimos la validación para incluir X, Instagram y Facebook
+            val redesValidas = listOf("tiktok", "youtu", "instagram", "facebook", "fb.watch", "x.com", "twitter")
+            
+            if (url.isNotEmpty() && redesValidas.any { url.contains(it) }) {
+                Toast.makeText(this, "🔍 Analizando contenido multi-red...", Toast.LENGTH_SHORT).show()
                 optionsPanel.visibility = View.VISIBLE
             } else {
-                Toast.makeText(this, "❌ Por favor, ingresá un link válido", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "❌ Link no soportado todavía", Toast.LENGTH_SHORT).show()
             }
         }
 
         btnHD.setOnClickListener {
             val url = urlInput.text.toString().trim()
             if (url.contains("tiktok")) {
-                obtenerLinkTikTok(url)
-            } else if (url.contains("youtu")) {
-                obtenerLinkYouTube(url)
+                obtenerLinkTikTok(url, false)
             } else {
-                ejecutarDescarga(url, "DWA_Video_${System.currentTimeMillis()}")
+                // 
+                obtenerLinkUniversal(url, false)
             }
         }
 
         btnMP3.setOnClickListener {
-            Toast.makeText(this, "📻 Función MP3 próximamente...", Toast.LENGTH_SHORT).show()
+            val url = urlInput.text.toString().trim()
+            if (url.contains("tiktok")) {
+                obtenerLinkTikTok(url, true)
+            } else {
+                obtenerLinkUniversal(url, true)
+            }
         }
 
         verificarPermisos()
     }
 
-    private fun obtenerLinkTikTok(urlTiktok: String) {
+    private fun obtenerLinkTikTok(urlTiktok: String, soloAudio: Boolean) {
         val client = OkHttpClient()
-        val request = Request.Builder()
-            .url("https://www.tikwm.com/api/?url=$urlTiktok")
-            .build()
+        val request = Request.Builder().url("https://www.tikwm.com/api/?url=$urlTiktok").build()
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                runOnUiThread { Toast.makeText(this@MainActivity, "Error de red TikTok", Toast.LENGTH_SHORT).show() }
+                runOnUiThread { Toast.makeText(this@MainActivity, "Error en TikTok", Toast.LENGTH_SHORT).show() }
             }
-
             override fun onResponse(call: Call, response: Response) {
                 val resBody = response.body?.string()
                 if (resBody != null) {
                     val json = JSONObject(resBody)
                     val data = json.optJSONObject("data")
                     if (data != null) {
-                        val videoUrl = data.getString("play")
+                        val downloadUrl = if (soloAudio) data.optString("music") else data.getString("play")
                         val titulo = data.optString("title", "TikTok_DWA")
-                        runOnUiThread { ejecutarDescarga(videoUrl, titulo) }
+                        runOnUiThread { ejecutarDescarga(downloadUrl, titulo, soloAudio) }
                     }
                 }
             }
         })
     }
 
-    private fun obtenerLinkYouTube(urlYoutube: String) {
+    // 
+    private fun obtenerLinkUniversal(urlMedia: String, soloAudio: Boolean) {
         val client = OkHttpClient()
-        
-        // Configuramos el cuerpo del JSON para la API de Cobalt
+        val urlLimpia = if (urlMedia.contains("?")) urlMedia.split("?")[0] else urlMedia
+
         val json = JSONObject()
-        json.put("url", urlYoutube)
-        json.put("vQuality", "720") // Calidad HD
+        json.put("url", urlLimpia)
+        json.put("isAudioOnly", soloAudio)
+        if (!soloAudio) json.put("vQuality", "720")
 
         val mediaType = "application/json; charset=utf-8".toMediaType()
         val body = json.toString().toRequestBody(mediaType)
@@ -117,46 +123,49 @@ class MainActivity : AppCompatActivity() {
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                runOnUiThread { Toast.makeText(this@MainActivity, "Error de red YouTube", Toast.LENGTH_SHORT).show() }
+                runOnUiThread { Toast.makeText(this@MainActivity, "Error de conexión", Toast.LENGTH_SHORT).show() }
             }
-
             override fun onResponse(call: Call, response: Response) {
                 val resBody = response.body?.string()
                 if (resBody != null) {
                     try {
                         val jsonRes = JSONObject(resBody)
-                        val videoUrl = jsonRes.optString("url")
-                        if (videoUrl.isNotEmpty()) {
-                            runOnUiThread { ejecutarDescarga(videoUrl, "YT_Video_${System.currentTimeMillis()}") }
+                        val downloadUrl = if (jsonRes.has("url")) jsonRes.getString("url") else jsonRes.optString("picker")
+                        
+                        if (downloadUrl.isNotEmpty()) {
+                            runOnUiThread { ejecutarDescarga(downloadUrl, "DWA_${System.currentTimeMillis()}", soloAudio) }
                         } else {
-                            runOnUiThread { Toast.makeText(this@MainActivity, "YouTube no permitió la extracción", Toast.LENGTH_SHORT).show() }
+                            runOnUiThread { Toast.makeText(this@MainActivity, "Contenido privado o no encontrado", Toast.LENGTH_SHORT).show() }
                         }
                     } catch (e: Exception) {
-                        runOnUiThread { Toast.makeText(this@MainActivity, "Error procesando YouTube", Toast.LENGTH_SHORT).show() }
+                        runOnUiThread { Toast.makeText(this@MainActivity, "Error en el servidor de extracción", Toast.LENGTH_SHORT).show() }
                     }
                 }
             }
         })
     }
 
-    private fun ejecutarDescarga(url: String, nombreArchivo: String) {
+    private fun ejecutarDescarga(url: String, nombreArchivo: String, esAudio: Boolean) {
         try {
+            val extension = if (esAudio) ".mp3" else ".mp4"
+            val mimeType = if (esAudio) "audio/mpeg" else "video/mp4"
+            val subCarpeta = if (esAudio) "DWA/Music" else "DWA/Videos"
+
             val request = DownloadManager.Request(Uri.parse(url))
                 .setTitle("DWA: $nombreArchivo")
-                .setDescription("Descargando contenido...")
-                .setMimeType("video/mp4")
+                .setDescription("Guardando archivo...")
+                .setMimeType(mimeType)
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalPublicDir(Environment.DIRECTORY_MOVIES, "DWA/$nombreArchivo.mp4")
+                .setDestinationInExternalPublicDir(Environment.DIRECTORY_MOVIES, "$subCarpeta/$nombreArchivo$extension")
                 .setAllowedOverMetered(true)
-                .setAllowedOverRoaming(true)
 
             val downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             downloadManager.enqueue(request)
             
-            Toast.makeText(this, "📥 Descarga iniciada...", Toast.LENGTH_SHORT).show()
+            runOnUiThread { Toast.makeText(this, "📥 Iniciando: ${if (esAudio) "MP3" else "Video"}", Toast.LENGTH_SHORT).show() }
 
         } catch (e: Exception) {
-            Toast.makeText(this, "Error de descarga: ${e.message}", Toast.LENGTH_LONG).show()
+            runOnUiThread { Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show() }
         }
     }
 
