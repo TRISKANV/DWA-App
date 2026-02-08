@@ -45,34 +45,26 @@ class MainActivity : AppCompatActivity() {
 
         btnAnalyze.setOnClickListener {
             val url = urlInput.text.toString().trim().lowercase()
-            // Expandimos la validación para incluir X, Instagram y Facebook
             val redesValidas = listOf("tiktok", "youtu", "instagram", "facebook", "fb.watch", "x.com", "twitter")
             
             if (url.isNotEmpty() && redesValidas.any { url.contains(it) }) {
-                Toast.makeText(this, "🔍 Analizando contenido multi-red...", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "🔍 Analizando contenido...", Toast.LENGTH_SHORT).show()
                 optionsPanel.visibility = View.VISIBLE
             } else {
-                Toast.makeText(this, "❌ Link no soportado todavía", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "❌ Link no soportado o vacío", Toast.LENGTH_SHORT).show()
             }
         }
 
         btnHD.setOnClickListener {
             val url = urlInput.text.toString().trim()
-            if (url.contains("tiktok")) {
-                obtenerLinkTikTok(url, false)
-            } else {
-                // 
-                obtenerLinkUniversal(url, false)
-            }
+            if (url.contains("tiktok")) obtenerLinkTikTok(url, false)
+            else obtenerLinkUniversal(url, false)
         }
 
         btnMP3.setOnClickListener {
             val url = urlInput.text.toString().trim()
-            if (url.contains("tiktok")) {
-                obtenerLinkTikTok(url, true)
-            } else {
-                obtenerLinkUniversal(url, true)
-            }
+            if (url.contains("tiktok")) obtenerLinkTikTok(url, true)
+            else obtenerLinkUniversal(url, true)
         }
 
         verificarPermisos()
@@ -101,7 +93,6 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    // 
     private fun obtenerLinkUniversal(urlMedia: String, soloAudio: Boolean) {
         val client = OkHttpClient()
         val urlLimpia = if (urlMedia.contains("?")) urlMedia.split("?")[0] else urlMedia
@@ -123,7 +114,7 @@ class MainActivity : AppCompatActivity() {
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                runOnUiThread { Toast.makeText(this@MainActivity, "Error de conexión", Toast.LENGTH_SHORT).show() }
+                runOnUiThread { Toast.makeText(this@MainActivity, "Error de red", Toast.LENGTH_SHORT).show() }
             }
             override fun onResponse(call: Call, response: Response) {
                 val resBody = response.body?.string()
@@ -131,14 +122,11 @@ class MainActivity : AppCompatActivity() {
                     try {
                         val jsonRes = JSONObject(resBody)
                         val downloadUrl = if (jsonRes.has("url")) jsonRes.getString("url") else jsonRes.optString("picker")
-                        
                         if (downloadUrl.isNotEmpty()) {
                             runOnUiThread { ejecutarDescarga(downloadUrl, "DWA_${System.currentTimeMillis()}", soloAudio) }
-                        } else {
-                            runOnUiThread { Toast.makeText(this@MainActivity, "Contenido privado o no encontrado", Toast.LENGTH_SHORT).show() }
                         }
                     } catch (e: Exception) {
-                        runOnUiThread { Toast.makeText(this@MainActivity, "Error en el servidor de extracción", Toast.LENGTH_SHORT).show() }
+                        runOnUiThread { Toast.makeText(this@MainActivity, "Servidor ocupado", Toast.LENGTH_SHORT).show() }
                     }
                 }
             }
@@ -149,20 +137,31 @@ class MainActivity : AppCompatActivity() {
         try {
             val extension = if (esAudio) ".mp3" else ".mp4"
             val mimeType = if (esAudio) "audio/mpeg" else "video/mp4"
-            val subCarpeta = if (esAudio) "DWA/Music" else "DWA/Videos"
+            val folderName = if (esAudio) "DWA_Music" else "DWA_Videos"
+
+            // 
+            val path = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), folderName)
+            if (!path.exists()) path.mkdirs()
+            
+            val file = File(path, "$nombreArchivo$extension")
 
             val request = DownloadManager.Request(Uri.parse(url))
                 .setTitle("DWA: $nombreArchivo")
-                .setDescription("Guardando archivo...")
+                .setDescription("Guardando en Galería...")
                 .setMimeType(mimeType)
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalPublicDir(Environment.DIRECTORY_MOVIES, "$subCarpeta/$nombreArchivo$extension")
+                .setDestinationUri(Uri.fromFile(file))
                 .setAllowedOverMetered(true)
 
             val downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             downloadManager.enqueue(request)
             
-            runOnUiThread { Toast.makeText(this, "📥 Iniciando: ${if (esAudio) "MP3" else "Video"}", Toast.LENGTH_SHORT).show() }
+            // 
+            val mediaScanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+            mediaScanIntent.data = Uri.fromFile(file)
+            sendBroadcast(mediaScanIntent)
+
+            runOnUiThread { Toast.makeText(this, "📥 Bajando... revisá tu galería en breve", Toast.LENGTH_SHORT).show() }
 
         } catch (e: Exception) {
             runOnUiThread { Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show() }
