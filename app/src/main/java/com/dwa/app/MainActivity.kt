@@ -33,53 +33,77 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // 
         val urlInput = findViewById<EditText>(R.id.urlInput)
         val btnAnalyze = findViewById<Button>(R.id.btnAnalyze)
         val optionsPanel = findViewById<LinearLayout>(R.id.optionsPanel)
         val btnHD = findViewById<Button>(R.id.btnHD)
         val btnMP3 = findViewById<Button>(R.id.btnMP3)
 
-        // 
         optionsPanel.visibility = View.GONE
 
-        // 
         btnAnalyze.setOnClickListener {
             val url = urlInput.text.toString().trim()
-
             if (url.isNotEmpty() && (url.contains("tiktok") || url.contains("youtu") || url.contains("instagram"))) {
                 Toast.makeText(this, "🔍 Analizando contenido...", Toast.LENGTH_SHORT).show()
-                // 
                 optionsPanel.visibility = View.VISIBLE
             } else {
                 Toast.makeText(this, "❌ Por favor, ingresá un link válido", Toast.LENGTH_SHORT).show()
             }
         }
 
-        // 
         btnHD.setOnClickListener {
             val url = urlInput.text.toString().trim()
-            Toast.makeText(this, "⏳ Iniciando descarga...", Toast.LENGTH_SHORT).show()
-            
-            // 
-            ejecutarDescarga(url, "DWA_Video_${System.currentTimeMillis()}")
+            if (url.contains("tiktok")) {
+                obtenerLinkTikTok(url)
+            } else {
+                ejecutarDescarga(url, "DWA_Video_${System.currentTimeMillis()}")
+            }
         }
 
-        // 5. Botón Solo Audio
         btnMP3.setOnClickListener {
-            Toast.makeText(this, "📻 Extrayendo audio...", Toast.LENGTH_SHORT).show()
-            // Lógica similar para MP3
+            Toast.makeText(this, "📻 Función MP3 próximamente...", Toast.LENGTH_SHORT).show()
         }
 
-        // 
         verificarPermisos()
+    }
+
+    private fun obtenerLinkTikTok(urlTiktok: String) {
+        val client = OkHttpClient()
+        // 
+        val request = Request.Builder()
+            .url("https://www.tikwm.com/api/?url=$urlTiktok")
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                runOnUiThread { Toast.makeText(this@MainActivity, "Error de red", Toast.LENGTH_SHORT).show() }
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val resBody = response.body?.string()
+                if (resBody != null) {
+                    val json = JSONObject(resBody)
+                    val data = json.optJSONObject("data")
+                    if (data != null) {
+                        val videoUrl = data.getString("play") // Link directo al video
+                        val titulo = data.optString("title", "Video_DWA")
+                        runOnUiThread {
+                            ejecutarDescarga(videoUrl, titulo)
+                        }
+                    } else {
+                        runOnUiThread { Toast.makeText(this@MainActivity, "No se encontró el video", Toast.LENGTH_SHORT).show() }
+                    }
+                }
+            }
+        })
     }
 
     private fun ejecutarDescarga(url: String, nombreArchivo: String) {
         try {
             val request = DownloadManager.Request(Uri.parse(url))
-                .setTitle("DWA Descargando")
-                .setDescription("Guardando en /Movies/DWA")
+                .setTitle("DWA: $nombreArchivo")
+                .setDescription("Descargando video...")
+                .setMimeType("video/mp4") // 
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_MOVIES, "DWA/$nombreArchivo.mp4")
                 .setAllowedOverMetered(true)
@@ -88,8 +112,7 @@ class MainActivity : AppCompatActivity() {
             val downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             downloadManager.enqueue(request)
             
-            // 
-            mostrarNotificacionExito(nombreArchivo)
+            Toast.makeText(this, "📥 Descarga iniciada...", Toast.LENGTH_SHORT).show()
 
         } catch (e: Exception) {
             Toast.makeText(this, "Error de descarga: ${e.message}", Toast.LENGTH_LONG).show()
@@ -104,39 +127,8 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
             permisos.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
-
         if (permisos.isNotEmpty()) {
             ActivityCompat.requestPermissions(this, permisos.toTypedArray(), 100)
-        }
-    }
-
-    private fun mostrarNotificacionExito(archivo: String) {
-        val channelId = "DWA_NOTIF"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "Descargas", NotificationManager.IMPORTANCE_DEFAULT)
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
-        }
-
-        val intentShare = Intent(Intent.ACTION_SEND).apply {
-            type = "video/mp4"
-            putExtra(Intent.EXTRA_TEXT, "¡Mirá lo que descargué con DWA!")
-        }
-        val pendingShare = PendingIntent.getActivity(this, 0, 
-            Intent.createChooser(intentShare, "Compartir con..."), PendingIntent.FLAG_IMMUTABLE)
-
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
-            .setContentTitle("DWA: ¡Video Listo! ✅")
-            .setContentText("Se guardó $archivo")
-            .addAction(android.R.drawable.ic_menu_share, "COMPARTIR", pendingShare)
-            .setAutoCancel(true)
-            .build()
-
-        NotificationManagerCompat.from(this).apply {
-            if (ActivityCompat.checkSelfPermission(this@MainActivity, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
-                notify(1, notification)
-            }
         }
     }
 }
